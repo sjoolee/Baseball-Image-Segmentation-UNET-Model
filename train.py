@@ -16,52 +16,52 @@ from utils import (
 #Hyperparameters & Configuration.
 LEARNING_RATE = 1e-4
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-BATCH_SIZE = 32 #may need to decrease
-NUM_EPOCHS = 100
+BATCH_SIZE = 15 #may need to decrease from 32
+NUM_EPOCHS = 15
 NUM_WORKERS = 2
-IMAGE_HEIGHT = 160 #originally 1280 height and 1918 for width
-IMAGE_WIDTH = 240
+IMAGE_HEIGHT = 640 #originally 1280 height and 1918 for width
+IMAGE_WIDTH = 640
 PIN_MEMORY = True
-LOAD_MODEL = True
-TRAIN_IMG_DIR = "baseball_data/train/"
-TRAIN_MASK_DIR = "baseball_data/train_masks/"
-VAL_IMG_DIR = "baseball_data/valid/"
-VAL_MASK_DIR = "baseball_data/valid_masks/"
+LOAD_MODEL = False
+TRAIN_IMG_DIR = "baseball.v1i.coco-segmentation/val2/images/"
+TRAIN_MASK_DIR = "baseball.v1i.coco-segmentation/val2/masks/"
+VAL_IMG_DIR = "baseball.v1i.coco-segmentation/val3/images/"
+VAL_MASK_DIR = "baseball.v1i.coco-segmentation/val3/masks/"
 
 
-def train_fn(loader, model, optimizer, loss_fn, scaler): #performs the data augmentation for training and validation sets using albumentations library, intilizes the U-Net model, loss function (Binary Cross Entropy w Logits) and optimizer (Adam)
+def train_fn(loader, model, optimizer, loss_fn, scaler):
     loop = tqdm(loader)
 
     for batch_idx, (data, targets) in enumerate(loop):
         data = data.to(device=DEVICE)
-        targets = targets.float().unsqueeze(1).to(device=DEVICE) 
+        targets = targets.float().unsqueeze(1).to(device=DEVICE)
 
-        #forward pass
+        # forward
         with torch.cuda.amp.autocast():
             predictions = model(data)
             loss = loss_fn(predictions, targets)
 
-        #backward pass
+        # backward
         optimizer.zero_grad()
         scaler.scale(loss).backward()
         scaler.step(optimizer)
         scaler.update()
 
-        #update tqdm progress loop
+        # update tqdm loop
         loop.set_postfix(loss=loss.item())
 
 
 def main():
-    train_transform = A.Compose (
+    train_transform = A.Compose(
         [
-            A.Resize(height=IMAGE_HEIGHT, width = IMAGE_WIDTH),
+            A.Resize(height=IMAGE_HEIGHT, width=IMAGE_WIDTH),
             A.Rotate(limit=35, p=1.0),
             A.HorizontalFlip(p=0.5),
             A.VerticalFlip(p=0.1),
             A.Normalize(
-                mean = [0.0,0.0,0.0],
-                std = [1.0,1.0,1.0],
-                max_pixel_value=255.0, #may not need 
+                mean=[0.0, 0.0, 0.0],
+                std=[1.0, 1.0, 1.0],
+                max_pixel_value=255.0,
             ),
             ToTensorV2(),
         ],
@@ -70,17 +70,13 @@ def main():
     val_transforms = A.Compose(
         [
             A.Resize(height=IMAGE_HEIGHT, width=IMAGE_WIDTH),
-            A.Normalize(
-                mean=[0.0,0.0,0.0],
-                std=[1.0,1.0,1.0],
-                max_pixel_value=255.0,
-            ),
+            A.Normalize(mean=[0.0, 0.0, 0.0], std=[1.0, 1.0, 1.0], max_pixel_value=255.0,),
             ToTensorV2(),
         ],
     )
 
     model = UNET(in_channels=3, out_channels=1).to(DEVICE)
-    loss_fn = nn.BCEWithLogitsLoss() #for more segmentation it would be out_channel = # of classes and loss function = cross entropy loss
+    loss_fn = nn.BCEWithLogitsLoss()
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
 
     train_loader, val_loader = get_loaders(
@@ -96,11 +92,11 @@ def main():
     )
 
     if LOAD_MODEL:
-        load_checkpoint(torch.load("my_checkpoint.pth.tar"), model) #if the model is loaded, flag is set to True and it proceeds to load a pre-trained model checkpoint
+        load_checkpoint(torch.load("my_checkpoint.pth.tar"), model)
 
 
-    check_accuracy(val_loader, model, device=DEVICE) #computes and prints accuracy of the model on the validation set
-    scaler = torch.cuda.amp.GradScaler() #initializes gradient scaler object for mixed-precision training #used to scale the loss value during backpropagation to prevent underflow/overflow of gradients when using float16 data types
+    check_accuracy(val_loader, model, device=DEVICE)
+    scaler = torch.cuda.amp.GradScaler()
 
     for epoch in range(NUM_EPOCHS):
         train_fn(train_loader, model, optimizer, loss_fn, scaler)
@@ -115,12 +111,9 @@ def main():
         # check accuracy
         check_accuracy(val_loader, model, device=DEVICE)
 
-        # print some examples to a folder #saves predictions made by the model on the validation set images
-        save_predictions_as_imgs(
-            val_loader, model, folder="saved_images/", device=DEVICE
-        )
+        # print some examples to a folder
+        save_predictions_as_imgs(val_loader, model, folder="saved_images/", device=DEVICE)
 
 
 if __name__ == "__main__":
     main()
-    
